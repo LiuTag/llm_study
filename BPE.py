@@ -223,5 +223,53 @@ class BPETokenizer:
         )
 
     def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
-        for s in iterable:
-            yield from self.encode(s)
+        # 输入块（例如文件中的行）不一定恰好落在预分词边界上。
+        # 只输出已经完整结束的片段；末尾片段与可能尚未到齐的特殊 token 留待下一块。
+        pending = ""
+
+        for chunk in iterable:
+            pending += chunk
+            if not pending:
+                continue
+
+            # 末尾若可能是特殊 token 的开头，它前面的最后一个预分词片段
+            # 也要暂存：特殊 token 成立与否会影响紧邻空白的正则分组。
+            candidate_start = len(pending)
+            for special in self.special_tokens:
+                for size in range(1, min(len(special), len(pending)) + 1):
+                    if pending.endswith(special[:size]):
+                        candidate_start = min(candidate_start, len(pending) - size)
+            scannable = pending[:candidate_start]
+            parts = (
+                self._special_split_re.split(scannable)
+                if self._special_split_re is not None
+                else [scannable]
+            )
+            offset = 0
+            spans: list[tuple[int, str, bool]] = []
+            for part in parts:
+                if part in self._special_set:
+                    spans.append((offset + len(part), part, True))
+                else:
+                    for match in _PRETOKEN_PATTERN.finditer(part):
+                        spans.append((offset + match.end(), match.group(), False))
+                offset += len(part)
+
+            emitted_end = 0
+            for end, text, is_special in spans[:-1]:
+                if is_special:
+                    yield self.specialtoken2id[text.encode("utf-8")]
+                else:
+                    ids = self._cache.get(text)
+                    if ids is None:
+                        ids = [self._byte_to_id[b] for b in text.encode("utf-8")]
+                        self._apply_bpe(ids)
+                        self._cache[text] = ids
+                    yield from ids
+                emitted_end = end
+
+            if emitted_end:
+                pending = pending[emitted_end:]
+
+        if pending:
+            yield from self.encode(pending)
