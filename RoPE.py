@@ -12,7 +12,7 @@ class RotaryPositionalEmbedding(nn.Module):
         super().__init__()
         self.theta = theta
         if d_k <= 0 or d_k % 2 != 0:
-            raise ValueError("d_k must be a positive even integer")
+            raise ValueError("d_k必须是正偶数")
         self.d_k = d_k
         self.max_seq_len = max_seq_len
         frequencies = theta ** (-torch.arange(0, d_k, 2, device=device) / d_k)

@@ -1,0 +1,20 @@
+{
+  "train_path": "data/smoke/train.bin",
+  "val_path": "data/smoke/val.bin",
+  "metrics_path": "runs/smoke/metrics.jsonl",
+  "checkpoint_path": "runs/smoke/final.pt",
+  "vocab_size": 50257,
+  "context_length": 64,
+  "d_model": 64,
+  "num_layers": 2,
+  "num_heads": 4,
+  "d_ff": 176,
+  "rope_theta": 10000.0,
+  "batch_size": 2,
+  "max_steps": 2,
+  "eval_interval": 1,
+  "eval_batches": 1,
+  "learning_rate": 0.0003,
+  "device": "cuda",
+  "seed": 42
+}

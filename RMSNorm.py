@@ -9,7 +9,6 @@ class RMSNorm(nn.Module):
         device=None,
         dtype=None,
     ):
-        # 初始化模块、保存 eps、创建可训练的 weight
         super().__init__()
         self.eps = eps
         self.dtype = dtype
@@ -17,7 +16,6 @@ class RMSNorm(nn.Module):
         self.weight = nn.Parameter(torch.ones((d_model,),dtype=dtype,device=device))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        # 根据上面的公式实现
         x_float32 = x.to(dtype=torch.float32)
         x_2 = x_float32 * x_float32
         r = torch.sqrt(torch.mean(x_2,dim=-1,keepdim=True) + self.eps)

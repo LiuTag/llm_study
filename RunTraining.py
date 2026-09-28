@@ -1,4 +1,4 @@
-"""读取 JSON 配置，在本机（建议 GPU 台式机）运行本项目训练入口。"""
+"""运行本项目训练入口。"""
 
 from __future__ import annotations
 
