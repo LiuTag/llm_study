@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 import tiktoken
 
-from PrepareTraining import load_gpt2_tokenizer, prepare_pair
+from PrepareTraining import load_gpt2_tokenizer, make_smoke_texts, prepare_pair
 
 
 def test_gpt2_fixture_loader_matches_reference() -> None:
@@ -33,6 +33,15 @@ def test_prepare_pair_writes_compatible_bins(tmp_path) -> None:
         np.testing.assert_array_equal(actual, expected)
         assert info[f"{split}_tokens"] == len(expected)
     assert json.loads((output_dir / "metadata.json").read_text(encoding="utf-8"))["vocab_size"] == 50257
+
+
+def test_bundled_smoke_sample_prepares_train_and_validation(tmp_path) -> None:
+    train_text, val_text = make_smoke_texts(tmp_path / "source")
+    assert train_text.read_text(encoding="utf-8") != val_text.read_text(encoding="utf-8")
+
+    info = prepare_pair(train_text, val_text, tmp_path / "tokens")
+    assert info["train_tokens"] > 64
+    assert info["val_tokens"] > 64
 
 
 if __name__ == "__main__":

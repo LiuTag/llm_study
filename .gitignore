@@ -5,3 +5,6 @@ __pycache__/
 data/
 runs/
 *.py[cod]
+assignment1-basics/
+test/test_adapter_*.py
+test/test_bpe_adapter.py

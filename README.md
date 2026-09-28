@@ -1,6 +1,6 @@
 # mini_gpt
 
-一个用 PyTorch 从头实现的最小自回归语言模型项目，沿 [Stanford CS336 Assignment 1](https://github.com/stanford-cs336/assignment1-basics) 的顺序学习字节级 BPE、Transformer、训练与文本生成。本仓库的模型、优化器和分词器实现放在根目录；`test/` 是本项目的测试，`config/` 是运行配置，`doc/` 保存原理笔记，**使用项目只需阅读本 README**。
+一个用 PyTorch 从头实现的最小自回归语言模型项目，沿 Stanford CS336 Assignment 1 的顺序学习字节级 BPE、Transformer、训练与文本生成。本仓库的模型、优化器和分词器实现放在根目录；`test/` 是本项目的测试，`config/` 是运行配置。使用项目只需阅读本 README。
 
 模型由 token Embedding、带 RoPE 的因果多头自注意力、RMSNorm、SwiGLU、Transformer Block 和输出投影组成。训练使用交叉熵与自实现的 AdamW；推理支持温度和 top-p 采样。当前已验证小样本分词、两步端到端训练、checkpoint 加载和文本生成。配置是流程起点，**并非已训练好的模型或保证收敛的超参数**。
 
@@ -13,7 +13,8 @@
 | `CrossEntropy.py`、`AdamW.py`、`Data.py`、`Train.py`、`TrainLoop.py`、`TrainingScript.py`、`Checkpoint.py` | 损失、优化器、取批次、训练循环及保存/加载 |
 | `GradientClipping.py`、`LearningRateSchedule.py` | 已单独实现；目前尚未接入实际训练循环 |
 | `DownloadCorpora.py`、`RunTraining.py`、`Generate.py`、`RunGeneration.py` | 下载语料、训练入口和生成入口 |
-| `config/`、`test/`、`doc/` | 示例配置、测试、可选的原理笔记 |
+| `assets/gpt2/`、`assets/smoke_stories.txt` | 项目自带的 GPT-2 词表/merges 与冒烟测试小样本 |
+| `config/`、`test/` | 示例配置、测试 |
 | `data/`、`runs/` | 本地语料及 token 文件、训练指标及 checkpoint；已被 Git 忽略 |
 
 ## 环境准备
@@ -30,17 +31,11 @@ python -c "import torch; print(torch.__version__, torch.cuda.is_available())"
 
 `requirements.txt` 包含 `torch`。如果要使用 NVIDIA GPU，建议在安装其余依赖前，先按 [PyTorch 官方安装页面](https://pytorch.org/get-started/locally/) 为本机选择合适的 CUDA 版；仅安装 CUDA Toolkit 不代表当前 PyTorch 能使用 GPU。CPU 可以用于测试和小规模冒烟训练。
 
-**当前资源依赖：**`PrepareTraining.py` 和 `RunGeneration.py` 仍从 `assignment1-basics/tests/fixtures/` 读取 GPT-2 的 `gpt2_vocab.json` 与 `gpt2_merges.txt`；冒烟数据准备还会读取该目录下的 TinyStories 小样本。若项目根目录没有 `assignment1-basics/`，先运行：
-
-```powershell
-git clone --depth 1 https://github.com/stanford-cs336/assignment1-basics.git assignment1-basics
-```
-
-这是当前版本的外部资源依赖，不需要把整个官方仓库复制进本项目的 GitHub 仓库。尚未将这两份词表文件整理为项目自带资源，因此**只克隆本仓库并安装依赖，还不能直接进行数据准备或推理**。
+GPT-2 词表和合并规则已随项目放在 `assets/gpt2/`，冒烟样本放在 `assets/smoke_stories.txt`。安装依赖后即可使用项目提供的数据准备、训练与推理入口；无需额外下载分词器文件。资源来源及许可说明见 `assets/gpt2/NOTICE.md`。
 
 ## 五分钟流程验证
 
-以下命令在项目根目录执行。`--smoke` 从官方仓库附带的小样本生成互不重叠的训练/验证文本，再编码成 `uint16` token 文件：
+以下命令在项目根目录执行。`--smoke` 从项目内置的英文小故事生成互不重叠的训练/验证文本，再编码成 `uint16` token 文件：
 
 ```powershell
 python PrepareTraining.py --smoke --output-dir data/smoke
@@ -89,7 +84,7 @@ python RunGeneration.py --config config/tinystories.json --prompt "Once upon a t
 python -m pytest test -q --ignore=test/test_training_reliability.py
 ```
 
-部分本地 adapter 测试以及数据准备/推理测试依赖上面克隆的官方仓库资源。`test/test_training_reliability.py` 是下一阶段的验收测试，现阶段预期失败，因此在当前回归命令中暂时排除；不要把这个排除项理解为功能已通过。
+`test/test_training_reliability.py` 是下一阶段的验收测试，现阶段预期失败，因此在当前回归命令中暂时排除；不要把这个排除项理解为功能已通过。发布到本仓库的其余测试只使用项目内的源码和资源。
 
 - 当前 `TrainingScript.py` **训练结束后**才写入指标 JSONL 和最终 checkpoint；中途中断会丢失本次未保存的进度，周期保存、实时日志和断点续训尚未完成。
 - 梯度裁剪和余弦学习率函数已实现，但训练目前使用固定学习率，尚未调用这两个函数。
