@@ -124,7 +124,18 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
+def force_utf8_console() -> None:
+    """Windows 中文控制台默认代码页 936（GBK）。字节级 BPE 解码出的非法 UTF-8
+    会被替换为 U+FFFD，而 GBK 无法表示该字符，print() 将抛 UnicodeEncodeError。
+    测试替换的内存流没有 reconfigure，故逐个判断。"""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+
+
 def main() -> None:
+    force_utf8_console()
+
     args = parse_args()
 
     # 1) 配置文件（相对项目根目录解析）
