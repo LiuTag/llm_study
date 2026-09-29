@@ -29,6 +29,8 @@ def main() -> None:
         config["device"] = args.device
     for key in PATH_KEYS:
         config[key] = ROOT / config[key]
+    if config.get("resume_from",None) is not None:
+        config["resume_from"] = ROOT / config["resume_from"]
     if args.probe_steps is not None:
         if args.probe_steps <= 0:
             parser.error("--probe-steps 必须为正整数")

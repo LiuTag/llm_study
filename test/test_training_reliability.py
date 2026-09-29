@@ -102,18 +102,43 @@ def test_metrics_and_periodic_checkpoint_survive_an_interruption(tmp_path, monke
     assert saved["iteration"] == 2
 
 
-def test_resume_trims_log_ahead_of_checkpoint_and_continues(tmp_path) -> None:
-    paths = training_kwargs(tmp_path, max_steps=2)
+def test_resume_trims_log_ahead_of_checkpoint_and_continues(tmp_path, monkeypatch) -> None:
+    paths = training_kwargs(tmp_path, max_steps=4)
+    original_train_loop = TrainingScript.train_loop
+
+    def interrupt_after_step_three_is_logged(*args, on_evaluation, **kwargs):
+        def log_then_interrupt(record):
+            on_evaluation(record)
+            if record["step"] == 3:
+                raise RuntimeError("模拟第 3 步日志落盘后中断")
+
+        return original_train_loop(
+            *args, on_evaluation=log_then_interrupt, **kwargs
+        )
+
+    monkeypatch.setattr(
+        TrainingScript, "train_loop", interrupt_after_step_three_is_logged
+    )
     torch.manual_seed(37)
-    TrainingScript.run_training(**paths, checkpoint_interval=1)
-    assert [row["step"] for row in read_metrics(paths["metrics_path"])] == [0, 1, 2]
+    with pytest.raises(RuntimeError, match="第 3 步日志落盘后中断"):
+        TrainingScript.run_training(**paths, checkpoint_interval=2)
 
-    with paths["metrics_path"].open("a", encoding="utf-8") as output:
-        output.write(json.dumps({"step": 3, "train_loss": -99.0, "val_loss": -99.0}) + "\n")
+    # 第 2 步已保存 checkpoint；第 3 步已评估并写入日志，但还未到下次保存点。
+    assert [row["step"] for row in read_metrics(paths["metrics_path"])] == [0, 1, 2, 3]
+    assert paths["checkpoint_path"].is_file(), "第 2 步应已保存 checkpoint"
+    interrupted_checkpoint = torch.load(
+        paths["checkpoint_path"], map_location="cpu", weights_only=True
+    )
+    assert interrupted_checkpoint["iteration"] == 2
+    assert interrupted_checkpoint["optimizer"]["state"]
+    assert all(
+        state["step"] == 2
+        for state in interrupted_checkpoint["optimizer"]["state"].values()
+    )
 
-    paths["max_steps"] = 4
+    monkeypatch.setattr(TrainingScript, "train_loop", original_train_loop)
     records = TrainingScript.run_training(
-        **paths, checkpoint_interval=1, resume_from=paths["checkpoint_path"]
+        **paths, checkpoint_interval=2, resume_from=paths["checkpoint_path"]
     )
 
     logged = read_metrics(paths["metrics_path"])
