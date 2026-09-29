@@ -180,6 +180,25 @@ def test_cli_resolves_resume_path_and_forwards_checkpoint_interval(tmp_path, mon
     assert received["checkpoint_path"] == tmp_path / "runs" / "checkpoint.pt"
 
 
+def test_resume_rejects_max_steps_that_would_not_advance(tmp_path) -> None:
+    """续训时 max_steps 必须严格大于 checkpoint 记录的步数，否则一步都不会训练。"""
+    paths = training_kwargs(tmp_path, max_steps=2)
+    torch.manual_seed(37)
+    TrainingScript.run_training(**paths, checkpoint_interval=1)
+
+    for bad_steps in (2, 1):
+        with pytest.raises(ValueError, match="max_steps"):
+            TrainingScript.run_training(
+                **{**paths, "max_steps": bad_steps},
+                resume_from=paths["checkpoint_path"],
+            )
+
+    records = TrainingScript.run_training(
+        **{**paths, "max_steps": 3}, resume_from=paths["checkpoint_path"]
+    )
+    assert records[-1]["step"] == 3
+
+
 def test_atomic_checkpoint_preserves_previous_file_if_write_fails(tmp_path, monkeypatch) -> None:
     model = nn.Linear(3, 2)
     optimizer = AdamW(model.parameters())

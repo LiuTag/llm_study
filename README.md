@@ -2,7 +2,7 @@
 
 一个用 PyTorch 从头实现的最小自回归语言模型项目，沿 Stanford CS336 Assignment 1 的顺序学习字节级 BPE、Transformer、训练与文本生成。本仓库的模型、优化器和分词器实现放在根目录；`test/` 是本项目的测试，`config/` 是运行配置。使用项目只需阅读本 README。
 
-模型由 token Embedding、带 RoPE 的因果多头自注意力、RMSNorm、SwiGLU、Transformer Block 和输出投影组成。训练使用交叉熵与自实现的 AdamW；推理支持温度和 top-p 采样。当前已验证小样本分词、两步端到端训练、checkpoint 加载和文本生成。配置是流程起点，**并非已训练好的模型或保证收敛的超参数**。
+模型由 token Embedding、带 RoPE 的因果多头自注意力、RMSNorm、SwiGLU、Transformer Block 和输出投影组成。训练使用交叉熵与自实现的 AdamW，支持梯度裁剪、余弦学习率调度、周期 checkpoint 和断点续训；推理支持温度和 top-p 采样。当前已验证小样本分词、端到端训练、周期保存、中断续训、checkpoint 加载和文本生成。配置是流程起点，**并非已训练好的模型或保证收敛的超参数**。
 
 ## 项目结构
 
@@ -11,7 +11,7 @@
 | `BPE.py`、`PrepareTraining.py`、`TokenizeData.py` | BPE 实现、加载 GPT-2 词表、把 UTF-8 文本编码为 token 文件 |
 | `Embedding.py`、`Attention.py`、`RoPE.py`、`RMSNorm.py`、`SwiGLU.py`、`TransformerBlock.py`、`TransformerLM.py` | 模型组件及完整语言模型 |
 | `CrossEntropy.py`、`AdamW.py`、`Data.py`、`Train.py`、`TrainLoop.py`、`TrainingScript.py`、`Checkpoint.py` | 损失、优化器、取批次、训练循环及保存/加载 |
-| `GradientClipping.py`、`LearningRateSchedule.py` | 已单独实现；目前尚未接入实际训练循环 |
+| `GradientClipping.py`、`LearningRateSchedule.py` | 梯度裁剪与余弦学习率调度，由训练循环按配置调用 |
 | `DownloadCorpora.py`、`RunTraining.py`、`Generate.py`、`RunGeneration.py` | 下载语料、训练入口和生成入口 |
 | `assets/gpt2/`、`assets/smoke_stories.txt` | 项目自带的 GPT-2 词表/merges 与冒烟测试小样本 |
 | `config/`、`test/` | 示例配置、测试 |
@@ -68,6 +68,23 @@ python RunTraining.py --config config/owt.json
 
 完整语料下载与编码可能耗时较长，需要预留磁盘空间。下载脚本使用 `.part` 保存未完成文件并尝试续传。`--probe-steps 100` 将输出写到独立的 `*_probe` 文件，不覆盖正式训练结果。`config/tinystories.json` 和 `config/owt.json` 当前均为 256-token 上下文、1000 步的起始配置；1000 步不代表已经充分训练。`config/smoke.json` 的上下文为 64 token。
 
+### 可选训练选项
+
+以下字段可直接写入配置 JSON，默认值即当前行为（关闭）：
+
+| 字段 | 默认 | 说明 |
+| --- | --- | --- |
+| `checkpoint_interval` | 不填 | 每隔多少步把 checkpoint 原子替换写入 `checkpoint_path`。**同一个文件被覆盖**，不会累积出多份权重 |
+| `max_grad_norm` | 不填 | 梯度裁剪的 L2 范数上限；不填则不裁剪 |
+| `warmup_iters` | `0` | 线性 warmup 步数；**必须与 `cosine_cycle_iters` 同时填写**才生效 |
+| `cosine_cycle_iters` | 不填 | 余弦衰减的周期步数，一般设成 `max_steps`。不填则整个调度关闭 |
+| `min_learning_rate` | `0.0` | 衰减到的最小学习率 |
+| `resume_from` | 不填 | 从该 checkpoint 继续训练。相对路径同样基于项目根目录解析 |
+
+中断后恢复训练的做法是：确认 `checkpoint_path` 里的权重仍在，把同一个配置原样重跑即可——训练会从 checkpoint 记录的步号继续，并把日志中超出该步号的记录裁掉。若要**换个步数继续**（例如把 `max_steps` 调大），把 `resume_from` 指向原 `checkpoint_path` 即可；`checkpoint_path` 应当仍是同一路径，否则续训中途的结果不会落到你预期的位置。
+
+长训练建议同时设置 `checkpoint_interval` 和余弦调度。前者让中断可恢复，后者让后期学习率自然衰减、不再震荡。
+
 ## 从 checkpoint 生成文本
 
 配置中的模型结构必须与 checkpoint 一致，分词器也必须与训练数据使用的词表一致。下面的命令默认加载 `config/tinystories.json` 指向的 `runs/tinystories/final.pt`：
@@ -81,12 +98,12 @@ python RunGeneration.py --config config/tinystories.json --prompt "Once upon a t
 ## 测试与当前限制
 
 ```powershell
-python -m pytest test -q --ignore=test/test_training_reliability.py
+python -m pytest test -q
 ```
 
-`test/test_training_reliability.py` 是下一阶段的验收测试，现阶段预期失败，因此在当前回归命令中暂时排除；不要把这个排除项理解为功能已通过。发布到本仓库的其余测试只使用项目内的源码和资源。
+`test/test_training_reliability.py` 覆盖训练可靠性：绝对步号的续训、训练中断后指标与 checkpoint 的存活、原子写入，以及日志中超前于 checkpoint 的记录在续训时被裁剪。它已纳入常规回归命令。测试只使用项目内的源码和资源。
 
-- 当前 `TrainingScript.py` **训练结束后**才写入指标 JSONL 和最终 checkpoint；中途中断会丢失本次未保存的进度，周期保存、实时日志和断点续训尚未完成。
-- 梯度裁剪和余弦学习率函数已实现，但训练目前使用固定学习率，尚未调用这两个函数。
+- 指标 JSONL 按评估点追加写入，checkpoint 按 `checkpoint_interval` 原子替换同一个文件；两者在**下一个保存点之前**中断，仍会丢失该区间内未保存的进度。周期保存不等于实时保存。
+- 梯度裁剪与余弦学习率调度**需在配置中显式开启**：`max_grad_norm` 不填则不裁剪；`warmup_iters` 必须与 `cosine_cycle_iters` 同时填写，只填前者会被静默忽略（不生效也不报错）。
 - 生成入口只加载本项目 `TransformerLM` 的 checkpoint，并非通用的 GPT-2 或其他市售模型权重加载器。
 - 中文可以被字节级 tokenizer 编码，但当前训练/推理入口固定使用 GPT-2 词表；改用新词表时，需要保持预处理、模型配置和推理一致，不能直接复用旧 checkpoint。

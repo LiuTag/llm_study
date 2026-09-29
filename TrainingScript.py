@@ -42,6 +42,12 @@ def run_training(
     start_step = 0
     if resume_from is not None:
         start_step = load_checkpoint(resume_from,model=model,optimizer=optimizer)
+        if max_steps <= start_step:
+            raise ValueError(
+                f"max_steps={max_steps} 未超过 checkpoint 记录的步数 start_step={start_step}，"
+                "不会执行任何训练步。续训时 max_steps 必须大于 start_step；"
+                "只想读取权重请改用 RunGeneration.py。"
+            )
 
     def on_step_end(it:int)->None:
         if checkpoint_interval is not None and it % checkpoint_interval == 0:
@@ -89,5 +95,6 @@ def run_training(
                 max_grad_norm=max_grad_norm,
                 lr_scheduler=lr_scheduler if cosine_cycle_iters is not None else None)
     
-    save_checkpoint_atomic(model,optimizer,max_steps,checkpoint_path)
+    save_checkpoint_atomic(model, optimizer, max(start_step, max_steps), checkpoint_path)
+
     return before_log + train_log
